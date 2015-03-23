@@ -1,0 +1,41 @@
+#' @name proteins
+#' @title Pathway Proteins
+#' @description This data set contains all proteins involved in KEGG, Reactome and SMPDB pathways 
+#' and indicate which proteins are involved in which pathway.
+#' @docType data
+#' @format A dataframe with 11540 rows and 2246 variables.  All variables are individual
+#' pathways.
+#' @note 
+#' The following open source databases were used to compile this file.  Commercial use and/or redistribution may restricted.  Please see respective terms of use pages and citations for more details.
+#' 
+#' KEGG
+#' 
+#' Terms of Use: http://www.kegg.jp/kegg/legal.html
+#' 
+#' Citations:
+#' 
+#' Kanehisa, M., Goto, S., Sato, Y., Kawashima, M., Furumichi, M., and Tanabe, M.  Data, information, knowledge and principle: back to metabolism in KEGG. Nucleic Acids Res. 42, D199-D205 (2014).
+#' 
+#' Kanehisa, M. and Goto, S.; KEGG: Kyoto Encyclopedia of Genes and Genomes. Nucleic Acids Res. 28, 27-30 (2000).
+#'
+#' SMPDB
+#' 
+#' Terms of Use: http://smpdb.ca/about
+#' 
+#' Citations:
+#' 
+#' Wishart DS, Frolkis A, Knox C, et al. SMPDB: The Small Molecule Pathway Database. Nucleic Acids Res. 2010 Jan;38(Database issue):D480-7.
+#' 
+#' Jewison T, Su Y, Disfany FM, et al. SMPDB 2.0: Big Improvements to the Small Molecule Pathway Database Nucleic Acids Res. 2014 Jan;42(Database issue):D478-84.
+#' 
+#' Reactome
+#' 
+#' Terms of Use: http://www.reactome.org/pages/about/license-agreement/
+#' 
+#' Citations:
+#' 
+#' Croft et al. 2014 PMID: 24243840
+#' 
+#' Milacic et al. 2012 PMID:24213504
+#' @keywords data
+NULL

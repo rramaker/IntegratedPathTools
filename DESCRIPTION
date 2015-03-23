@@ -1,0 +1,19 @@
+Package: IntegratedPathTools
+Title: A package for integrated pathway analysis.
+Version: 0.99.0
+Authors@R: person("Ryne", "Ramaker", email="rramaker@uab.edu", role=c("aut","cre"))
+Description: This package performs various integrated analyses on transcriptomic, proteomic, and metabolomic data sets.
+Depends: R (>= 3.1.2)
+License: Artistic-2.0
+LazyData: no
+Imports: ggplot2 (>= 1.0.0),
+    manipulate (>= 0.98.1091),
+    pathview (>= 1.6.0),
+    qgraph (>= 1.3.1),
+    gplots (>= 2.16.0),
+    dynamicTreeCut (>= 1.62),
+    RColorBrewer (>= 1.1-2)
+biocViews: Pathways, GraphAndNetwork, Visualization, Genetics, RNASeq, Metabolomics, 
+    Proteomics, SystemsBiology, Microarray
+Suggests: knitr
+VignetteBuilder: knitr

@@ -1,0 +1,448 @@
+---
+title: "IntegratedPathTools Guide"
+author: "Ryne Ramaker"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+---
+title: "IPA Vignette"
+author: "Ryne Ramaker"
+output: html_document
+---
+
+###Disclaimer
+This package is powered by the following open source databases.  Commercial use and/or redistribution may restricted.  Please see respective terms of use pages and citations for more details.
+
+KEGG
+
+Terms of Use: http://www.kegg.jp/kegg/legal.html
+
+Citations: 
+
+1. Kanehisa, M., Goto, S., Sato, Y., Kawashima, M., Furumichi, M., and Tanabe, M.; Data, information, knowledge and principle: back to metabolism in KEGG. Nucleic Acids Res. 42, D199–D205 (2014).
+
+2. Kanehisa, M. and Goto, S.; KEGG: Kyoto Encyclopedia of Genes and Genomes. Nucleic Acids Res. 28, 27-30 (2000).
+
+
+SMPDB
+
+Terms of Use: http://smpdb.ca/about
+
+Citations:
+
+1. Wishart DS, Frolkis A, Knox C, et al. SMPDB: The Small Molecule Pathway Database. Nucleic Acids Res. 2010 Jan;38(Database issue):D480-7.
+
+2. Jewison T, Su Y, Disfany FM, et al. SMPDB 2.0: Big Improvements to the Small Molecule Pathway Database Nucleic Acids Res. 2014 Jan;42(Database issue):D478-84.
+ 
+
+Reactome
+
+Terms of Use: http://www.reactome.org/pages/about/license-agreement/
+
+Citations:
+
+1. Croft et al. 2014 PMID: 24243840
+
+2. Milacic et al. 2012 PMID:24213504
+
+
+DrugBank
+
+Terms of Use: http://www.drugbank.ca/about
+
+Citations:
+
+1. DrugBank 4.0: shedding new light on drug metabolism. Law V, Knox C, Djoumbou Y, Jewison T, Guo AC, Liu Y, Maciejewski A, Arndt D, Wilson M, Neveu V, Tang A, Gabriel G, Ly C, Adamjee S, Dame ZT, Han B, Zhou Y, Wishart DS.Nucleic Acids Res. 2014 Jan 1;42(1):D1091-7. PubMed ID: 24203711
+
+2. DrugBank 3.0: a comprehensive resource for 'omics' research on drugs. Knox C, Law V, Jewison T, Liu P, Ly S, Frolkis A, Pon A, Banco K, Mak C, Neveu V, Djoumbou Y, Eisner R, Guo AC, Wishart DS.Nucleic Acids Res. 2011 Jan;39(Database issue):D1035-41.  PubMed ID: 21059682
+
+3. DrugBank: a knowledgebase for drugs, drug actions and drug targets. Wishart DS, Knox C, Guo AC, Cheng D, Shrivastava S, Tzur D, Gautam B, Hassanali M.Nucleic Acids Res. 2008 Jan;36(Database issue):D901-6. PubMed ID: 18048412
+
+4. DrugBank: a comprehensive resource for in silico drug discovery and exploration. Wishart DS, Knox C, Guo AC, Shrivastava S, Hassanali M, Stothard P, Chang Z, Woolsey J.Nucleic Acids Res. 2006 Jan 1;34(Database issue):D668-72.  PubMed ID: 16381955
+
+###Installation
+
+First install the current development version of the package from github.
+
+
+```{r, results='hide', message=FALSE}
+library(IntegratedPathTools)
+```
+
+###Formating your data
+
+To demonstrate some of the utility of this package I've included example data. 
+
+The first is RNAseq data conducted on samples from our patient cohort.  It consists of 14,802 transcripts with NCBI/Entrez IDs.  Multiple hypothesis adjusted p-values are in the first column and fold change values are in the second column.  The second column is not required for use of this package.
+
+
+```{r}
+data(kData)
+head(kData)
+```
+
+
+The second is a metabolomics data set conducted on our same patient cohort.  It consists of about 100 uniquely aligned metabolites with KEGG IDs. Multiple hypothesis adjusted p-values are in the first column and fold change values are in the second column.  The second column is not required for use of this package.
+
+
+```{r}
+data(rData)
+head(rData)
+```
+
+
+
+###ipa
+
+The ipa function is basically the core of this package.  It takes transcript, protein and/or metabolite data and performs pathway analysis to determine which pathways are signficantly enriched in your datasets individually or in combination.
+
+INPUT:
+
+_geneResult_/_proteinResult_/_metaboliteResult_: Dataframes containing transcriptomic, proteomic, or metabolomic data formatted as described above with example datasets.  Importantly, IPA only accepts entrez/NCBI IDs for transcripts, uniprot accession numbers for proteins and KEGG IDs for metabolites although we hope to be more flexible in the near future.
+
+_combine_:  A logical indicating if integrated pathway analysis is desired.  If TRUE, ipa will perform combined significance tests on enriched pathways using Fisher's method^1^.  If FALSE, ipa will return a list containing individual analyses on each of the datasets provided.
+
+_method_: Accepts "fisher.exact" for Fisher's exact test, "EASE" for a more conservative modified Fisher's exact test that examines the significance after removing one significant gene from the pathway category, "mean.significance" for comparison of mean pathway member significance values, "hypergeometric" for the related hypergeomtric test^{2,3}^.  Using the mean significance method can be computationally intensive so be sure to set a high cutoffThreshold to improve computation time and prevent biasing results on smaller pathway sizes.  Importantly, ipa will automatically generate a background list of genes/proteins/metabolites from your uploaded dataframe so be sure to use your full list of data to ensure proper results.
+
+_geneCutoff_/_proteinCutoff_/_metaboliteCutoff_: Significance value to use as threshold for pathway analysis.  Genes/proteins/metabolites below this value will be considered significant and above will be considered non-significant.  This variable is not required if the method "mean.significance" is used.
+
+_calculateFoldChange_:  A logical indicating if ipa should perform cumulative fold change to provide a sense of directionality for pathway data.  If TRUE, ipa will will add a column to results with cumulative fold change.  If TRUE, make sure inputed data has a second column with fold change information or an error will result.
+
+_pathwayType_: Pathway database to use for pathway analysis.  Options include "KEGG", "SMPDB", "Reactome", or "All".  Defaults to "All".  Selecting an individual database will speed up computation time and limit  multiple hypothesis testing burden.
+
+_countThreshold_: Integer indicating the minimum number of pathway members to require for a valid result. Defaults to 2.
+
+_p.adjustMethod_: Character indicating the type of multiple hypothesis correction to perform.  Defaults to "BH". See ?p.adjust() for details.
+
+OUTPUT:
+
+A dataframe containing pathway multiple hypothesis corrected pathway enrichment significance results, cumulative fold change data, pathway fold enrichment values, and information related to the number of significant genes/proteins/metabolites present in each pathway.
+
+EXAMPLE:
+
+In this example we'll perform integrated pathway analysis on transcript and metabolite data.
+
+
+```{r, message=FALSE}
+ipaResult<-ipa(geneResult=kData, metaboliteResult=rData, combine=TRUE, 
+               geneCutoff=0.1, metaboliteCutoff=0.219)
+```
+
+
+The resulting ipaResult is a dataframe with data on all database pathways with gene and metabolite information above the default cutoffThreshold of 2.  The first column contains the full pathway name. The next two columns contain FDR corrected and uncorrected pvalues.  
+
+
+```{r}
+head(ipaResult[,1:3])
+```
+
+
+The next 5 columns are pvalue, significant gene count, and total gene count, pathway fold enrichment and cumulative pathway member fold change information for each pathway based on transcript data alone.
+
+
+```{r}
+head(ipaResult[,4:8])
+```
+
+The final 5 columns are analagous to the previous 5 columns except contain information pertinant to metabolite data.
+
+
+```{r}
+head(ipaResult[,9:13])
+```
+
+Example #2:  Examining pathway enrichment in transcript and metabolite data sets individually can easily be accomplished as follows:
+
+```{r, message=FALSE}
+ipaResult2<-ipa(geneResult = kData, metaboliteResult = rData, 
+                combine=FALSE, geneCutoff=0.1, metaboliteCutoff=0.219,
+                pathwayType="KEGG")
+```
+
+Transcript information can be pulled out of the returned object:
+
+```{r}
+head(ipaResult2$Gene_Analysis)
+```
+
+Metabolite information can also be pulled out of the returned object:
+
+```{r}
+head(ipaResult2$Metabolite_Analysis)
+```
+
+###plotIPA
+
+The plotIPA function can be used to plot pathway analysis information provided by the ipa function.
+
+INPUT:
+
+_x_: A dataframe resulting from the ipa function
+
+_cutoff_: A positive integer indicating the number of pathways desired on plot.  Pathways will be sorted by signficance prior to selection.
+
+
+OUTPUT:
+
+A barplot of top showing relative significance of top pathways determined by ipa function.
+
+EXAMPLE:
+
+In this example we'll use the ipaResult object generated in the above ipa function example.
+
+
+```{r, fig.width=5, fig.height=5, fig.align='left'}
+plotIPA(ipaResult)
+```
+
+
+
+###manipulateIPA
+
+One of the major challenges to traditional pathway over-representation analyses is deciding which values to use as a significance threshold^4^.  Ideally, biologically important pathways will remain significant over a range of significance cutoffs.  To facilitate answering this question, the manipulate function provides interactive, integrated pathway analysis visualization allowing the user to change significance cutoffs for each data set in real time.  This function requires the use of RStudio (http://www.rstudio.com/products/rstudio/).  Importantly, manipulateIPA only accepts transcript and metabolite data currently.
+
+INPUT:
+
+Inputs are exactly the same as the ipa function.
+
+OUTPUT:
+
+An interactive plot with sliders allowing the user to adjust significance cutoffs for each dataset.
+
+EXAMPLE:
+
+In this example we again use example data provided by the package to execute this function.
+
+
+```{r, eval=FALSE}
+manipulateIPA(kData, rData, method="fisher.exact")
+```
+
+
+
+###bootstrapPath
+
+High-throuput enrichment analysis tools like Fisher's exact testing often do not give the user the ability assess the full probability of enrichment of a pathway due to chance alone.  The bootstrapPath function allows the user to perform post-hoc bootstrap resampling of from data and generates a histogram of enrichment probability distributions expected by chance alone for a pathway of interest.
+
+INPUT:
+
+_geneResult_/_proteinResult_/_metaboliteResult_: Dataframes as described previously in ipa function
+
+_pathway.id_:  Pathway ID for pathway of interest (ex. "hsa04727")
+
+_geneCutoff_/_proteinCutoff_/_metaboliteCutoff_: Significance cutoff thresholds as described previously in ipa function
+
+_seed_: Random number seed for reproducible results
+
+_numSims_: Number of bootstrap simulations to perform.  10000 or more is recommended, but this function will slow as this number is increased.
+
+OUTPUT:
+
+A histogram demonstranting the probability distributions of pathway enrichment levels due to chance alone.  Observed enrichment is indicated by a red vertical line.  Probability of achieving observed enrichment is included in plot title.
+
+EXAMPLE:
+
+In this example we will again use example data provided by the package to execute this function.
+
+
+```{r, fig.width=5, fig.height=5, fig.align='left'}
+bootstrapPath("hsa04727", geneResult = kData, metaboliteResult = rData, 
+              geneCutoff=0.1, metaboliteCutoff=0.219)
+```
+
+
+
+###manipulateBootstrapPath
+
+The manipulateBootstrapPath allows the user to interactively perform post-hoc bootstrap analysis and look out how probabilities of reaching observed enrichment change according to significance cutoffs in real time.  This function requires the use of RStudio (http://www.rstudio.com/products/rstudio/).  Importantly, manipulateIPA only accepts transcript and metabolite data currently.
+
+INPUT:
+
+_geneResult/metaboliteResult_: Dataframes as described in ipa function example above
+
+_pathway.id_: Pathway ID for pathway of interest (ex. "hsa04727")
+
+_seed_: Random number seed for reproducible results
+
+_numSims_: Number of bootstrap simulations to perform.  1000 or more is recommended, but this function will slow as this number is increased.
+
+OUTPUT:
+
+An interactive histogram showing distribution of pathway enrichment levels due to chance alone from bootstrap resampling.  Sliders allow user to change gene and metabolite significance cutoff levels in real time.
+
+EXAMPLE:
+
+
+```{r, eval=FALSE}
+manipulateBootstrapPath("hsa04727", kData, rData)
+```
+
+
+###viewPath
+
+The viewPath function allows the use to seamlessly use data to visualize KEGG pathways with their data overlaid via the Bioconductor pathview pacakge (bioconductor.org/packages/release/bioc/html/pathview.html).
+
+INPUT:
+
+_geneResult_/_proteinResult_/_metaboliteResult_: Dataframes as described previously in ipa function.  Second column with fold change information is required for this function.
+
+_cutoff_:  Significance cutoff to use for determing which genes/proteins/metabolites to plot in pathway. Defaults at 1 to plot all data.
+
+_pathway.id_: KEGG pathway ID for pathway of interest (ex. "hsa04727")
+
+_geneColors_: Vector of three colors to use to represent gene/protein fold changes. Defaults to c("green", "grey","red").
+
+_metaboliteColors_: Vector of three colors to use to represent metabolite fold changes.  Defaults to c("blue","grey","yellow")
+
+OUTPUT:
+
+Exports .png files of KEGG pathway and KEGG pathway with overlaid user data to user working directory.
+
+EXAMPLE:
+
+
+```{r, eval=FALSE}
+viewPath(geneResult=kData, metaboliteResult=rData, pathway.id="hsa04727")
+```
+
+###findDrugTargets
+
+The findDrugTargets function allows users to find drugs which target significant genes or transcripts in their data sets.  It relies on drug target information compiled by the Drug Bank database.
+
+INPUT:
+
+_geneResult/proteinResult_: Dataframes as described previously in ipa function.
+
+_cutoff_: Significance cutoff to use for selecting which genes/proteins to use for drug target analysis.
+
+OUTPUT:
+
+Returns a dataframe with gene or protein targets listed for each drug capable of targeting significant genes or proteins.  Results are sorted by a promiscuity score which is a rough scale that balances the total number of drug targets with the number of targets found about your significance cutoff.  The formula for calculation is simply:
+
+promiscuityScore = n * (1/(1+m^{-log(k)}^))
+
+where:
+
+n = total number of drug targets,
+m = the number of drug hits found above significance threshold, and
+k = the ratio of genes/proteins which meet the significance threshold to total genes/proteins
+
+This does not represent relative significance in any way as a drug with a single target could be equally as important (or more!) as a drug with several targets. It is simply a tool to inform the user of the relative promiscuity of drugs in the output.
+
+EXAMPLE:
+
+```{r}
+targets<-findDrugTargets(geneResult = kData, cutoff=0.1)
+```
+
+The output is a two column data frame with targets for each drug in the first column and the promiscuity score in the second column.
+
+
+```{r}
+head(targets)
+```
+
+###mgCorr
+
+The mgCorr function allows users to look for transcript-metabolite via correlation networks.  The input for this function differs from the above functions in that these functions require dataframes of metabolite and transcript data by sample.
+
+INPUT:
+
+_geneData_: Dataframe of transcript data with samplie IDs as rownames and transcript IDs as column headers.  Sample IDs should match metabolite data input.
+
+_metaboliteData_: Dataframe of metabolite data with samplie IDs as rownames and metabolite IDs as column headers.  Sample IDs should match transcript data input.
+
+_moduleDriver_: Input "metabolite" or "gene" to dictate whether networks should be driven by gene or metabolite data.  This script is optimized for using metabolite data as the moduleDrive.  If using "gene" is much more computationally intensive.  Be sure to use a heavily filtered gene list of less than 10000 genes for reasonable computation time.
+
+_correlationMethod_: Indcate which correlation method to use.  Can be any method accepted by cor function.  See ?cor for details. Defaults to "pearson".
+
+_minCoef_: Number between 0 and 1 indicating the minimum correlation coeficient cutoff to be included in network. Defaults to 0.5.
+
+_minModuleSize_: Number indicating the minimum size of driver modules used for network construction. See minClusterSize in ?cutreeDynamic. Defaults to 10
+
+_minModuleSize_: Number indicating the minimum size of driver modules used for network construction. See minClusterSize in ?cutreeDynamic. Defaults to 10
+
+_numNetworks_: Number indicating the number of networks to construct.  Networks will be constructed in order module size.
+
+_plotHeatmap_: Logical indicating whether to plot metabolite-gene correlation heatmap.  This will greatly increase computation time.  Defaults to FALSE
+
+OUTPUT: 
+
+Plots correlation networks to default environment.  Returns a list of dataframes.  The first returned dataframe gives the connectivity of each driving element of each module.  The following dataframes contain the full edgelist information for modules in order of module size.
+
+EXAMPLE:
+
+I've included some example data for use with these functions.  kDataRaw is scaled DESeq2 variant stabilized transcript count data and rDataRaw is scaled metabolite data.
+
+```{r}
+data(kDataRaw)
+data(rDataRaw)
+```
+
+Next we'll use mgCorr to look for transcript metabolite networks.
+
+```{r, fig.width=5, fig.height=5, fig.align='left'}
+
+result<-mgCorr(kDataRaw, rDataRaw, numNetworks=1)
+```
+
+Our result contains a list of dataframes.  The first of which is a summary of each metabolite in our networks.  It gives a connectivity score which is simply equivalent to the number of edges connected to the node representing that metabolite.
+
+```{r}
+head(result[1])
+```
+
+The subsequent dataframes are the edgelists for each network you specified with numNetworks.
+
+```{r}
+head(result[2])
+```
+
+
+###mgSeededCorr
+
+INPUT:
+
+_geneData_: Dataframe of transcript data with samplie IDs as rownames and transcript IDs as column headers.  Sample IDs should match metabolite data input.
+
+_metaboliteData_: Dataframe of metabolite data with samplie IDs as rownames and metabolite IDs as column headers.  Sample IDs should match transcript data input.
+
+_geneSeed_: Gene of interest to be used as seed of correlation network.  Be sure to use metaboliteSeed if you want to seed with a metabolite.  Defaults to NULL
+
+_metaboliteSeed_: Metabolite of interest to be used as seed of correlation network.  Be sure to use geneSeed if you want to seed with a gene.  Defaults to NULL
+
+_correlationMethod_: Indcate which correlation method to use.  Can be any method accepted by cor function.  See ?cor for details. Defaults to "pearson".
+
+_minCoef_: Number between 0 and 1 indicating the minimum correlation coeficient cutoff to be included in network. Defaults to 0.5.
+
+_maxNodes_: Number indicating the maximum number of nodes desired in your output.
+
+OUTPUT:
+
+Plots seeded correlation networks to default environment.  Returns a list of dataframe with edgelist for the plot.
+
+EXAMPLE:
+
+In this example we'll find the top 20 genes and metabolites correlated with GABA levels in our dataset and draw the correspoinding correlation network.  
+
+```{r, fig.width=5, fig.height=5, fig.align='left'}
+seededResult<-mgSeededCorr(kDataRaw, rDataRaw, metaboliteSeed = "C00334")
+```
+
+The result contains a dataframe with the edge list information for the correlation network.
+
+```{r}
+seededResult
+```
+
+
+###Citations
+1. Fisher, R. A. (1952) _Statistical Methods for Research Workers._ Oliver and Boyd. ISBN: 0-05-002170-2
+2. Rivals, I.; Personnaz, L.; Taing, L.; Potier, M. (2007). "Enrichment or depletion of a GO category within a class of genes: which test?" _Bioinformatics_ **23** (4): 401-407. PMID: 17182697
+3. Hosack, D.A., et. al. (2003). "Identifying biological themes within lists of genes with EASE" _Genome Biology_ **4** (10): R70. PMID: 14519205
+4. Khatri P, Sirota M, Butte AJ. (2012). "Ten years of pathway analysis: current approaches and outstanding challenges" _PLos Comput Biol._ **8** (2):e1002375. PMID: 22383865
