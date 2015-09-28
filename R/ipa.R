@@ -1,16 +1,16 @@
 #' This takes dataframes with rna and metabolite info and performs pathway analysis
 #' @param geneResult Dataframe with transcript IDs as rownames, transcript signifigance values (between 0 and 1) as the first column, and optionally transcript fold change values as the second column. Defaults to NULL
-#' @param proteinResult Dataframe with Uniprot Accession IDs as rownames, Protein signifigance values (between 0 and 1) as the first column, and optionally protein fold change values as the second column. Defaults to NULL
 #' @param metaboliteResult Dataframe with metabolite IDs as rownames, metabolite signifigance values (between 0 and 1) as the first column, and optionally metabolite fold change values as the second column. Defaults to NULL
 #' @param combine Logical indicated whether to perform combined transcirpt and metabolite analysis.  Defaults to FALSE
 #' @param method Method of pathway analysis to perform. Options include "fisher.exact",  "EASE", "mean.significance", and "hypergeometric.test". Defaults to "fisher.exact.
 #' @param geneCutoff Significance cutoff to use for transcript analysis
-#' @param proteinCutoff Significance cutoff to use for protein analysis
 #' @param metaboliteCutoff Significance cutoff to use for metabolite analysis
 #' @param pathwayType Pathway database to use for pathway analysis.  Options include "KEGG", "SMPDB", "Reactome", or "All".  Defaults to "All"
 #' @param calculateFoldChange Logical indicating whether to perform cumulative fold change calculations.  If true, must have a second column with fold change numbers in geneResult and/or metaboliteResult input.  Defaults to TRUE.
 #' @param countThreshold Integer indicating the minimum number of pathway members to require for a valid result. Defaults to 2.
 #' @param p.adjustMethod Character indicating the type of multiple hypothesis correction to perform.  Defaults to "BH". See ?p.adjust() for details
+#' @param plotResult Logical indicating whether to barplot negative log FDR values of pathway results.
+#' @param plotNumber Integer indicating number of pathways, in order of significance, to include in barplot if plotResult == TRUE
 #' @keywords IPA
 #' @export
 #' @return Returns a dataframe with pathway FDR corrected pathway significance and cumulative fold change for each pathway.
@@ -59,41 +59,40 @@
 #' 
 #' Milacic et al. 2012 PMID:24213504
 
-ipa<-function(geneResult=NULL, proteinResult=NULL, metaboliteResult=NULL, combine=FALSE, method=c("fisher.exact", "EASE", "mean.significance", "hypergeometric"), geneCutoff=NULL, proteinCutoff=NULL, metaboliteCutoff=NULL, pathwayType=c("All", "KEGG", "SMPDB", "Reactome"), calculateFoldChange=TRUE, countThreshold=2, p.adjustMethod="BH"){
+ipa<-function(geneResult=NULL, metaboliteResult=NULL, combine=FALSE, 
+              method=c("fisher.exact", "EASE", "mean.significance", "hypergeometric"), 
+              geneCutoff=NULL, metaboliteCutoff=NULL, 
+              pathwayType=c("All", "KEGG", "SMPDB", "Reactome"), 
+              calculateFoldChange=TRUE, countThreshold=2, p.adjustMethod="BH",
+              plotResult = TRUE, plotNumber = 10){
   #Import database info
   data(genes, envir=environment())
   data(metabolites, envir=environment())
-  data(proteins, envir=environment())
   data(pathIndex, envir=environment())
   pathIndex<-pathIndex
   #Subset database info by pathwayType
   if(pathwayType[1] == "All"){ 
     genes<-genes
     metabolites<-metabolites
-    proteins<-proteins
   }
   else if(pathwayType[1] == "KEGG"){
     genes<-genes[,colnames(genes)[which(grepl("hsa", colnames(genes)))]]
     metabolites<-metabolites[,colnames(metabolites)[which(grepl("hsa", colnames(metabolites)))]]
-    proteins<-proteins[,colnames(metabolites)[which(grepl("hsa", colnames(metabolites)))]]    
   }
   else if(pathwayType[1] == "SMPDB"){
     genes<-genes[,colnames(genes)[which(grepl("SMP", colnames(genes)))]]
     metabolites<-metabolites[,colnames(metabolites)[which(grepl("SMP", colnames(metabolites)))]]
-    proteins<-proteins[,colnames(metabolites)[which(grepl("SMP", colnames(metabolites)))]]
   }
   else if(pathwayType[1] == "Reactome"){
     genes<-genes[,colnames(genes)[which(grepl("REACT", colnames(genes)))]]
     metabolites<-metabolites[,colnames(metabolites)[which(grepl("REACT", colnames(metabolites)))]]
-    proteins<-proteins[,colnames(metabolites)[which(grepl("REACT", colnames(metabolites)))]]
   }
   
   #establish result index
   geneR<-NULL
-  proteinR<-NULL
   metabR<-NULL
   
-  #Funcions for Analysis
+  #Funcions for Analysis:
   #Function for calculating pathway cumulative fold change efficiently
   calcFoldChange<-function(pathwayFilt, toORA){
     FCvalues<-toORA[row.names(pathwayFilt),]
@@ -201,6 +200,7 @@ ipa<-function(geneResult=NULL, proteinResult=NULL, metaboliteResult=NULL, combin
     return(result)
   }
   
+  #Function for calculating gene analysis
   gene.test <- function(testResult, background = row.names(testResult), genes, cutoff, method, calculateFoldChange = TRUE){
     pathwayFilt<-genes[,-which(colSums(genes[background, ], na.rm=TRUE)<countThreshold)]
     if(method[1] == "fisher.exact"){
@@ -360,163 +360,7 @@ ipa<-function(geneResult=NULL, proteinResult=NULL, metaboliteResult=NULL, combin
     }
   }
   
-  protein.test <- function(testResult, background = row.names(testResult), proteins, cutoff, method, calculateFoldChange = TRUE){
-    pathwayFilt<-proteins[,-which(colSums(proteins[background, ], na.rm=TRUE)<countThreshold)]
-    if(method[1] == "fisher.exact"){
-      if(calculateFoldChange == FALSE){
-        #Generate dataframe for ORA analysis
-        toORA <- testResult[order(testResult[,1]),]
-        #Filter for only markers below the specified FDR cutoff
-        sigList <- row.names(subset(toORA, toORA[,1] < cutoff))
-        #Determine which significant markers are found in specified protein pathways
-        sigFilter <- row.names(pathwayFilt)%in%sigList
-        
-        #Calculate Fisher's exact test and other pathway info
-        finalResult<-calcFisherExact(pathwayFilt, sigFilter, background, p.adjustMethod)
-        
-        message(paste("Matched ", sum(row.names(pathwayFilt)%in%background, na.rm=TRUE), " proteins out of ", length(background), " total proteins to ", ncol(pathwayFilt), " pathways out of ", ncol(proteins), " total pathways with a count threshold of ", countThreshold, sep=""))
-        
-        colnames(finalResult)<- c("Pathway_protein_FDR","Pathway_protein_p_value", "Sig_protein_Number", "Total_protein_Number", "Protein_Fold_Enrichment")
-        
-        finalResult<-finalResult[order(finalResult[,2]),]
-        return(finalResult)
-      }
-      else{
-        #Generate dataframe for ORA analysis
-        toORA <- testResult[order(testResult[,1]),]
-        #Filter for only markers below the specified FDR cutoff
-        sigList <- row.names(subset(toORA, toORA[,1] < cutoff))
-        #Determine which significant markers are found in specified protein pathways
-        sigFilter <- row.names(pathwayFilt)%in%sigList
-        
-        #Calculate cumulative Fold Change for pathway directionality
-        FCsum<-calcFoldChange(pathwayFilt, toORA)
-        
-        #Calculate Fisher's exact test and other pathway info
-        finalResult<-calcFisherExact(pathwayFilt, sigFilter, background, p.adjustMethod)
-        
-        message(paste("Matched ", sum(row.names(pathwayFilt)%in%background, na.rm=TRUE), " proteins out of ", length(background), " total proteins to ", ncol(pathwayFilt), " pathways out of ", ncol(proteins), " total pathways with a count threshold of ", countThreshold, sep=""))
-        
-        #Add significant fold change information
-        finalResult<-cbind(finalResult, FCsum)
-        colnames(finalResult)<- c("Pathway_protein_FDR","Pathway_protein_p_value", "Sig_protein_Number", "Total_protein_Number", "Protein_Fold_Enrichment", "Protein_Cumulative_Fold_Change")
-        
-        finalResult<-finalResult[order(finalResult[,2]),]
-        return(finalResult)
-        
-      }
-    }
-    else if(method[1] == "EASE"){
-      if(calculateFoldChange == FALSE){
-        #Generate dataframe for ORA analysis
-        toORA <- testResult[order(testResult[,1]),]
-        #Filter for only markers below the specified FDR cutoff
-        sigList <- row.names(subset(toORA, toORA[,1] < cutoff))
-        #Determine which significant markers are found in specified protein pathways
-        sigFilter <- row.names(pathwayFilt)%in%sigList
-        #calculate EASE score and other pathway info
-        finalResult<-calcEASE(pathwayFilt, sigFilter, background, p.adjustMethod)
-        message(paste("Matched ", sum(row.names(pathwayFilt)%in%background, na.rm=TRUE), " proteins out of ", length(background), " total proteins to ", ncol(pathwayFilt), " pathways out of ", ncol(proteins), " total pathways with a count threshold of ", countThreshold, sep=""))
-        colnames(finalResult)<- c("Pathway_protein_FDR","Pathway_protein_p_value", "Sig_protein_Number", "Total_protein_Number", "Protein_Fold_Enrichment")
-        
-        finalResult<-finalResult[order(finalResult[,2]),]
-        return(finalResult)
-      }
-      else{
-        #Generate dataframe for ORA analysis
-        toORA <- testResult[order(testResult[,1]),]
-        #Filter for only markers below the specified FDR cutoff
-        sigList <- row.names(subset(toORA, toORA[,1] < cutoff))
-        #Determine which significant markers are found in specified protein pathways
-        sigFilter <- row.names(pathwayFilt)%in%sigList
-        
-        #Calculate cumulative Fold Change for pathway directionality
-        FCsum<-calcFoldChange(pathwayFilt, toORA)
-        
-        #calculate EASE score and other pathway info
-        finalResult<-calcEASE(pathwayFilt, sigFilter, background, p.adjustMethod)
-        message(paste("Matched ", sum(row.names(pathwayFilt)%in%background, na.rm=TRUE), " proteins out of ", length(background), " total proteins to ", ncol(pathwayFilt), " pathways out of ", ncol(proteins), " total pathways with a count threshold of ", countThreshold, sep=""))
-        
-        #Add significant fold change information
-        finalResult<-cbind(finalResult, FCsum)
-        colnames(finalResult)<- c("Pathway_protein_FDR","Pathway_protein_p_value", "Sig_protein_Number", "Total_protein_Number", "Protein_Fold_Enrichment", "Protein_Cumulative_Fold_Change")
-        
-        finalResult<-finalResult[order(finalResult[,2]),]
-        return(finalResult)
-        
-      }
-    }
-    else if(method[1] == "hypergeometric"){
-      if(calculateFoldChange == FALSE){
-        
-        #Generate dataframe for ORA analysis
-        toORA <- testResult[order(testResult[,1]),]
-        #Filter for only markers below the specified FDR cutoff
-        sigList <- row.names(subset(toORA, toORA[,1] < cutoff))
-        #Determine which significant markers are found in specified gene pathways
-        sigFilter <- row.names(pathwayFilt)%in%sigList
-        
-        #Calculate hypergeometric test and other pathway info
-        finalResult<-calcHypergeometric(pathwayFilt, sigFilter, background, p.adjustMethod)
-        message(paste("Matched ", sum(row.names(pathwayFilt)%in%background, na.rm=TRUE), " proteins out of ", length(background), " total proteins to ", ncol(pathwayFilt), " pathways out of ", ncol(proteins), " total pathways with a count threshold of ", countThreshold, sep=""))
-        colnames(finalResult)<- c("Pathway_Protein_FDR","Pathway_Protein_p_value", "Sig_protein_Number", "Total_Protein_Number", "Fold_Enrichment")
-        finalResult<-finalResult[order(finalResult[,2]),]
-        return(finalResult)
-        
-      }
-      else{
-        
-        #Generate dataframe for ORA analysis
-        toORA <- testResult[order(testResult[,1]),]
-        #Filter for only markers below the specified FDR cutoff
-        sigList <- row.names(subset(toORA, toORA[,1] < cutoff))
-        #Determine which significant markers are found in specified gene pathways
-        sigFilter <- row.names(pathwayFilt)%in%sigList
-        
-        #Calculate cumulative Fold Change for pathway directionality
-        FCsum<-calcFoldChange(pathwayFilt, toORA)
-        
-        #Calculate hypergeometric test and other pathway info
-        finalResult<-calcHypergeometric(pathwayFilt, sigFilter, background, p.adjustMethod)
-        message(paste("Matched ", sum(row.names(pathwayFilt)%in%background, na.rm=TRUE), " proteins out of ", length(background), " total proteins to ", ncol(pathwayFilt), " pathways out of ", ncol(proteins), " total pathways with a count threshold of ", countThreshold, sep=""))
-        
-        #Add significant fold change information
-        finalResult<-cbind(finalResult, FCsum) 
-        colnames(finalResult)<- c("Pathway_Protein_FDR","Pathway_Protein_p_value", "Sig_protein_Number", "Total_Protein_Number", "Fold_Enrichment", "Protein_Cumulative_Fold_Change")
-        
-        finalResult<-finalResult[order(finalResult[,2]),]
-        return(finalResult)
-        
-      }
-      
-    }
-    else if(method[1] == "mean.significance"){
-      if(calculateFoldChange == FALSE){
-        #Calculate mean significance values and other pathway info
-        result<-calcMeanSig(pathwayFilt, background, testResult)
-        message(paste("Matched ", N, " proteins out of ", length(background), " total proteins to ", ncol(pathwayFilt), " pathways out of ", ncol(proteins), " total pathways with a count threshold of ", countThreshold, sep=""))
-        colnames(result)=c("Mean_Pathway_Significance", "Sig_Protein_Number")
-        result<-result[order(result[,1]),]
-        return(result)
-        
-      }else{
-        
-        #Calculate pathway fold changes
-        #Generate dataframe for FC analysis
-        toORA <- testResult[order(testResult[,1]),]
-        FCsum<-calcFoldChange(pathwayFilt, toORA)
-        
-        #Calculate mean significance values and other pathway info
-        result<-calcMeanSig(pathwayFilt, background, testResult)
-        message(paste("Matched ", N, " proteins out of ", length(background), " total proteins to ", ncol(pathwayFilt), " pathways out of ", ncol(proteins), " total pathways with a count threshold of ", countThreshold, sep=""))
-        result<-cbind(result, FCsum)
-        colnames(result)=c("Mean_Pathway_Significance", "Sig_Protein_Number", "Protein_Cumulative_Fold_Change")
-        result<-result[order(result[,1]),]
-        return(result)
-      }
-    }
-  }
-  
+  #Function for calculating metabolite analysis
   metab.test <- function(testResult, background = row.names(testResult), metabolites, cutoff, method, calculateFoldChange = TRUE){
     pathwayFilt<-metabolites[,-which(colSums(metabolites[background, ], na.rm=TRUE)<countThreshold)]
     if(method[1] == "fisher.exact"){
@@ -670,7 +514,8 @@ ipa<-function(geneResult=NULL, proteinResult=NULL, metaboliteResult=NULL, combin
     }
   }
   
-  combined.test <- function(gene_result=NULL, protein_result=NULL, metab_result=NULL, calculateFoldChange = TRUE, method){
+  #Function for calculating combined gene-metabolite analysis
+  combined.test <- function(gene_result=NULL, metab_result=NULL, calculateFoldChange = TRUE, method){
     #define fisher function
     Fisher.test <- function(p) {
       Xsq <- -2*sum(log(p))
@@ -679,475 +524,135 @@ ipa<-function(geneResult=NULL, proteinResult=NULL, metaboliteResult=NULL, combin
     }
     
     if(method[1]=="mean.significance"){
-      if(is.null(protein_result)){
-        if(calculateFoldChange == FALSE){  
-          #filter gene_result for only pathways which include metabolites
-          genes_w_metab<-row.names(gene_result)[which(row.names(gene_result)%in%row.names(metab_result))]
-          gene_result<-gene_result[genes_w_metab, ]
-          metab_result<-metab_result[genes_w_metab, ]
-          
-          result = matrix(nrow=nrow(metab_result), ncol=3)
-          for(i in 1:nrow(metab_result)){
-            result[i,1] = sum(gene_result[i,1]*(gene_result[i,2]/(gene_result[i,2]+metab_result[i,2])) + metab_result[i,1]*(metab_result[i,2]/(metab_result[i,2]+gene_result[i,2])))
-            result[i,2] = gene_result[i,2]
-            result[i,3] = metab_result[i,2]
-          }
-          row.names(result)<-row.names(gene_result)
-          colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Gene_Number", "Total_Metabolite_Number")
-          
-          result<-result[order(result[,1]),]
+      if(calculateFoldChange == FALSE){  
+        #filter gene_result for only pathways which include metabolites
+        genes_w_metab<-row.names(gene_result)[which(row.names(gene_result)%in%row.names(metab_result))]
+        gene_result<-gene_result[genes_w_metab, ]
+        metab_result<-metab_result[genes_w_metab, ]
+        
+        result = matrix(nrow=nrow(metab_result), ncol=3)
+        for(i in 1:nrow(metab_result)){
+          result[i,1] = sum(gene_result[i,1]*(gene_result[i,2]/(gene_result[i,2]+metab_result[i,2])) + metab_result[i,1]*(metab_result[i,2]/(metab_result[i,2]+gene_result[i,2])))
+          result[i,2] = gene_result[i,2]
+          result[i,3] = metab_result[i,2]
         }
-        else{  
-          #filter gene_result for only pathways which include metabolites
-          genes_w_metab<-row.names(gene_result)[which(row.names(gene_result)%in%row.names(metab_result))]
-          gene_result<-gene_result[genes_w_metab, ]
-          metab_result<-metab_result[genes_w_metab, ]
-          
-          result = matrix(nrow=nrow(metab_result), ncol=5)
-          for(i in 1:nrow(metab_result)){
-            result[i,1] = sum(gene_result[i,1]*(gene_result[i,2]/(gene_result[i,2]+metab_result[i,2])) + metab_result[i,1]*(metab_result[i,2]/(metab_result[i,2]+gene_result[i,2])))
-            result[i,2] = gene_result[i,2]
-            result[i,3] = gene_result[i,3]
-            result[i,4] = metab_result[i,2]
-            result[i,5] = metab_result[i,3]
-          }
-          row.names(result)<-row.names(gene_result)
-          colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Gene_Number", "Gene_Cumulative_Fold_Change","Total_Metabolite_Number", "Metabolite_Cumulative_Fold_Change")
-          
-          result<-result[order(result[,1]),]
-        }
+        row.names(result)<-row.names(gene_result)
+        colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Gene_Number", "Total_Metabolite_Number")
+        
+        result<-result[order(result[,1]),]
       }
-      else if(is.null(gene_result)){
-        if(calculateFoldChange == FALSE){  
-          #filter protein_result for only pathways which include metabolites
-          proteins_w_metab<-row.names(protein_result)[which(row.names(protein_result)%in%row.names(metab_result))]
-          protein_result<-protein_result[proteins_w_metab, ]
-          metab_result<-metab_result[proteins_w_metab, ]
-          
-          result = matrix(nrow=nrow(metab_result), ncol=3)
-          for(i in 1:nrow(metab_result)){
-            result[i,1] = sum(protein_result[i,1]*(protein_result[i,2]/(protein_result[i,2]+metab_result[i,2])) + metab_result[i,1]*(metab_result[i,2]/(metab_result[i,2]+protein_result[i,2])))
-            result[i,2] = protein_result[i,2]
-            result[i,3] = metab_result[i,2]
-          }
-          row.names(result)<-row.names(protein_result)
-          colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Protein_Number", "Total_Metabolite_Number")
-          
-          result<-result[order(result[,1]),]
+      else{  
+        #filter gene_result for only pathways which include metabolites
+        genes_w_metab<-row.names(gene_result)[which(row.names(gene_result)%in%row.names(metab_result))]
+        gene_result<-gene_result[genes_w_metab, ]
+        metab_result<-metab_result[genes_w_metab, ]
+        
+        result = matrix(nrow=nrow(metab_result), ncol=5)
+        for(i in 1:nrow(metab_result)){
+          result[i,1] = sum(gene_result[i,1]*(gene_result[i,2]/(gene_result[i,2]+metab_result[i,2])) + metab_result[i,1]*(metab_result[i,2]/(metab_result[i,2]+gene_result[i,2])))
+          result[i,2] = gene_result[i,2]
+          result[i,3] = gene_result[i,3]
+          result[i,4] = metab_result[i,2]
+          result[i,5] = metab_result[i,3]
         }
-        else{  
-          #filter protein_result for only pathways which include metabolites
-          proteins_w_metab<-row.names(protein_result)[which(row.names(protein_result)%in%row.names(metab_result))]
-          protein_result<-protein_result[proteins_w_metab, ]
-          metab_result<-metab_result[proteins_w_metab, ]
-          
-          result = matrix(nrow=nrow(metab_result), ncol=5)
-          for(i in 1:nrow(metab_result)){
-            result[i,1] = sum(protein_result[i,1]*(protein_result[i,2]/(protein_result[i,2]+metab_result[i,2])) + metab_result[i,1]*(metab_result[i,2]/(metab_result[i,2]+protein_result[i,2])))
-            result[i,2] = protein_result[i,2]
-            result[i,3] = protein_result[i,3]
-            result[i,4] = metab_result[i,2]
-            result[i,5] = metab_result[i,3]
-          }
-          row.names(result)<-row.names(protein_result)
-          colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Protein_Number", "Protein_Cumulative_Fold_Change","Total_Metabolite_Number", "Metabolite_Cumulative_Fold_Change")
-          
-          result<-result[order(result[,1]),]
-        }
-      }
-      else if(is.null(metab_result)){
-        if(calculateFoldChange == FALSE){  
-          #filter protein_result for only pathways which include genes
-          proteins_w_genes<-row.names(protein_result)[which(row.names(protein_result)%in%row.names(gene_result))]
-          protein_result<-protein_result[proteins_w_genes, ]
-          gene_result<-gene_result[proteins_w_genes, ]
-          
-          result = matrix(nrow=nrow(metab_result), ncol=3)
-          for(i in 1:nrow(gene_result)){
-            result[i,1] = sum(protein_result[i,1]*(protein_result[i,2]/(protein_result[i,2]+gene_result[i,2])) + gene_result[i,1]*(gene_result[i,2]/(gene_result[i,2]+protein_result[i,2])))
-            result[i,2] = protein_result[i,2]
-            result[i,3] = gene_result[i,2]
-          }
-          row.names(result)<-row.names(protein_result)
-          colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Protein_Number", "Total_Gene_Number")
-          
-          result<-result[order(result[,1]),]
-        }
-        else{  
-          #filter protein_result for only pathways which include metabolites
-          proteins_w_genes<-row.names(protein_result)[which(row.names(protein_result)%in%row.names(gene_result))]
-          protein_result<-protein_result[proteins_w_genes, ]
-          gene_result<-metab_result[proteins_w_genes, ]
-          
-          result = matrix(nrow=nrow(metab_result), ncol=5)
-          for(i in 1:nrow(gene_result)){
-            result[i,1] = sum(protein_result[i,1]*(protein_result[i,2]/(protein_result[i,2]+gene_result[i,2])) + gene_result[i,1]*(gene_result[i,2]/(gene_result[i,2]+protein_result[i,2])))
-            result[i,2] = protein_result[i,2]
-            result[i,3] = protein_result[i,3]
-            result[i,4] = gene_result[i,2]
-            result[i,5] = gene_result[i,3]
-          }
-          row.names(result)<-row.names(protein_result)
-          colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Protein_Number", "Protein_Cumulative_Fold_Change","Total_Gene_Number", "Gene_Cumulative_Fold_Change")
-          
-          result<-result[order(result[,1]),]
-        }
-      }
-      else if(!is.null(gene_result)&!is.null(protein_result)&!is.null(metab_result)){
-        if(calculateFoldChange == FALSE){  
-          #filter for common pathways
-          proteins_w_genes = row.names(protein_result)[which(row.names(protein_result)%in%row.names(gene_result))]
-          proteins_w_genes_metab = proteins_w_genes[which(proteins_w_genes%in%row.names(metab_result))]
-          protein_result<-protein_result[proteins_w_genes_metab, ]
-          gene_result<-gene_result[proteins_w_genes_metab, ]
-          metab_result<-metab_result[proteins_w_genes_metab, ]
-          
-          result = matrix(nrow=nrow(metab_result), ncol=4)
-          for(i in 1:nrow(gene_result)){
-            result[i,1] = sum(protein_result[i,1]*(protein_result[i,2]/(protein_result[i,2]+gene_result[i,2]+metab_result[i,2])) + gene_result[i,1]*(gene_result[i,2]/(gene_result[i,2]+protein_result[i,2]+metab_result[i,2])) + metab_result[i,2]*(metab_result[i,2]/(gene_result[i,2]+protein_result[i,2]+metab_result[i,2])))
-            result[i,2] = protein_result[i,2]
-            result[i,3] = gene_result[i,2]
-            result[i,4] = metab_result[i,2]
-          }
-          row.names(result)<-row.names(protein_result)
-          colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Protein_Number", "Total_Gene_Number", "Total_Metabolite_Number")
-          
-          result<-result[order(result[,1]),]
-        }
-        else{  
-          #filter for common pathways
-          proteins_w_genes = row.names(protein_result)[which(row.names(protein_result)%in%row.names(gene_result))]
-          proteins_w_genes_metab = proteins_w_genes[which(proteins_w_genes%in%row.names(metab_result))]
-          protein_result<-protein_result[proteins_w_genes_metab, ]
-          gene_result<-gene_result[proteins_w_genes_metab, ]
-          metab_result<-metab_result[proteins_w_genes_metab, ]
-          
-          result = matrix(nrow=nrow(metab_result), ncol=7)
-          for(i in 1:nrow(gene_result)){
-            result[i,1] = sum(protein_result[i,1]*(protein_result[i,2]/(protein_result[i,2]+gene_result[i,2]+metab_result[i,2])) + gene_result[i,1]*(gene_result[i,2]/(gene_result[i,2]+protein_result[i,2]+metab_result[i,2])) + metab_result[i,2]*(metab_result[i,2]/(gene_result[i,2]+protein_result[i,2]+metab_result[i,2])))
-            result[i,2] = protein_result[i,2]
-            result[i,3] = protein_result[i,3]
-            result[i,4] = gene_result[i,2]
-            result[i,5] = gene_result[i,3]
-            result[i,6] = metab_result[i,2]
-            result[i,7] = metab_result[i,3]
-          }
-          row.names(result)<-row.names(protein_result)
-          colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Protein_Number", "Protein_Cumulative_Fold_Change","Total_Gene_Number", "Gene_Cumulative_Fold_Change", "Total_Metabolite_Number", "Metabolite_Cumulative_Fold_Change")
-          
-          result<-result[order(result[,1]),]
-        }
+        row.names(result)<-row.names(gene_result)
+        colnames(result)<- c("Mean_Combined_Pathway_Significance", "Total_Gene_Number", "Gene_Cumulative_Fold_Change","Total_Metabolite_Number", "Metabolite_Cumulative_Fold_Change")
+        
+        result<-result[order(result[,1]),]
       }
     }
     else{
-      
-      if(is.null(protein_result)){
-        if(calculateFoldChange == FALSE){  
-          #filter gene_result for only pathways which include metabolites
-          genes_w_metab<-row.names(gene_result)[which(row.names(gene_result)%in%row.names(metab_result))]
-          gene_result<-gene_result[genes_w_metab, ]
-          metab_result<-metab_result[genes_w_metab, ]
-          
-          #perform fisher method for joint p-values on all pathways
-          result = matrix(nrow=length(metab_result[,1]), ncol=9)
-          for(i in 1:length(metab_result[,1])){
-            result[i,1] = Fisher.test(p = c(gene_result[i,2], metab_result[i,2]))
-            result[i,2] = gene_result[i,2]
-            result[i,3] = gene_result[i,3]
-            result[i,4] = gene_result[i,4]
-            result[i,5] = gene_result[i,5]
-            result[i,6] = metab_result[i,2]
-            result[i,7] = metab_result[i,3]
-            result[i,8] = metab_result[i,4]
-            result[i,9] = metab_result[i,5]
-            
-          }
-          
-          #Perform tail-based (BH) Fdr analysis
-          toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
-          FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
-          #Create final dataframe
-          finalResult = cbind(FDR, result)
-          
-          #label row and column names appropriately
-          row.names(finalResult)<-row.names(metab_result)
-          colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue",colnames(gene_result[-1]), colnames(metab_result[-1]))
-          finalResult<-finalResult[order(finalResult[,2]),]
-          return(finalResult)
+      if(calculateFoldChange == FALSE){  
+        #filter gene_result for only pathways which include metabolites
+        genes_w_metab<-row.names(gene_result)[which(row.names(gene_result)%in%row.names(metab_result))]
+        gene_result<-gene_result[genes_w_metab, ]
+        metab_result<-metab_result[genes_w_metab, ]
+        
+        #perform fisher method for joint p-values on all pathways
+        result = matrix(nrow=length(metab_result[,1]), ncol=9)
+        for(i in 1:length(metab_result[,1])){
+          result[i,1] = Fisher.test(p = c(gene_result[i,2], metab_result[i,2]))
+          result[i,2] = gene_result[i,2]
+          result[i,3] = gene_result[i,3]
+          result[i,4] = gene_result[i,4]
+          result[i,5] = gene_result[i,5]
+          result[i,6] = metab_result[i,2]
+          result[i,7] = metab_result[i,3]
+          result[i,8] = metab_result[i,4]
+          result[i,9] = metab_result[i,5]
           
         }
-        else{
-          #filter gene_result for only pathways which include metabolites
-          genes_w_metab<-row.names(gene_result)[which(row.names(gene_result)%in%row.names(metab_result))]
-          gene_result<-gene_result[genes_w_metab, ]
-          metab_result<-metab_result[genes_w_metab, ]
-          
-          #perform fisher method for joint p-values on all pathways
-          result = matrix(nrow=length(metab_result[,1]), ncol=11)
-          for(i in 1:length(metab_result[,1])){
-            result[i,1] = Fisher.test(p = c(gene_result[i,2], metab_result[i,2]))
-            result[i,2] = gene_result[i,2]
-            result[i,3] = gene_result[i,3]
-            result[i,4] = gene_result[i,4]
-            result[i,5] = gene_result[i,5]
-            result[i,6] = gene_result[i,6]
-            result[i,7] = metab_result[i,2]
-            result[i,8] = metab_result[i,3]
-            result[i,9] = metab_result[i,4]
-            result[i,10] = metab_result[i,5]
-            result[i,11] = metab_result[i,6]
-            
-          }
-          
-          #Perform tail-based (BH) Fdr analysis
-          toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
-          FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
-          #Create final dataframe
-          finalResult = cbind(FDR, result)
-          
-          #label row and column names appropriately
-          row.names(finalResult)<-row.names(metab_result)
-          colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue",colnames(gene_result[-1]), colnames(metab_result[-1]))
-          finalResult<-finalResult[order(finalResult[,2]),]
-          return(finalResult)
-          
-        }
+        
+        #Perform tail-based (BH) Fdr analysis
+        toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
+        FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
+        #Create final dataframe
+        finalResult = cbind(FDR, result)
+        
+        #label row and column names appropriately
+        row.names(finalResult)<-row.names(metab_result)
+        colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue",colnames(gene_result[-1]), colnames(metab_result[-1]))
+        finalResult<-finalResult[order(finalResult[,2]),]
+        return(finalResult)
+        
       }
-      else if(is.null(gene_result)){
-        if(calculateFoldChange == FALSE){  
-          #filter protein_result for only pathways which include metabolites
-          proteins_w_metab = row.names(protein_result)[which(row.names(protein_result)%in%row.names(metab_result))]
-          protein_result<-protein_result[proteins_w_metab, ]
-          metab_result<-metab_result[proteins_w_metab, ]
-          
-          #perform fisher method for joint p-values on all pathways
-          result = matrix(nrow=length(metab_result[,1]), ncol=9)
-          for(i in 1:length(metab_result[,1])){
-            result[i,1] = Fisher.test(p = c(protein_result[i,2], metab_result[i,2]))
-            result[i,2] = protein_result[i,2]
-            result[i,3] = protein_result[i,3]
-            result[i,4] = protein_result[i,4]
-            result[i,5] = protein_result[i,5]
-            result[i,6] = metab_result[i,2]
-            result[i,7] = metab_result[i,3]
-            result[i,8] = metab_result[i,4]
-            result[i,9] = metab_result[i,5]
-            
-          }
-          
-          #Perform tail-based (BH) Fdr analysis
-          toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
-          FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
-          #Create final dataframe
-          finalResult = cbind(FDR, result)
-          
-          #label row and column names appropriately
-          row.names(finalResult)<-row.names(metab_result)
-          colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue",colnames(protein_result[-1]), colnames(metab_result[-1]))
-          
-          finalResult<-finalResult[order(finalResult[,2]),]
-          return(finalResult)
+      else{
+        #filter gene_result for only pathways which include metabolites
+        genes_w_metab<-row.names(gene_result)[which(row.names(gene_result)%in%row.names(metab_result))]
+        gene_result<-gene_result[genes_w_metab, ]
+        metab_result<-metab_result[genes_w_metab, ]
+        
+        #perform fisher method for joint p-values on all pathways
+        result = matrix(nrow=length(metab_result[,1]), ncol=11)
+        for(i in 1:length(metab_result[,1])){
+          result[i,1] = Fisher.test(p = c(gene_result[i,2], metab_result[i,2]))
+          result[i,2] = gene_result[i,2]
+          result[i,3] = gene_result[i,3]
+          result[i,4] = gene_result[i,4]
+          result[i,5] = gene_result[i,5]
+          result[i,6] = gene_result[i,6]
+          result[i,7] = metab_result[i,2]
+          result[i,8] = metab_result[i,3]
+          result[i,9] = metab_result[i,4]
+          result[i,10] = metab_result[i,5]
+          result[i,11] = metab_result[i,6]
           
         }
-        else{
-          #filter protein_result for only pathways which include metabolites
-          proteins_w_metab = row.names(protein_result)[which(row.names(protein_result)%in%row.names(metab_result))]
-          protein_result<-protein_result[proteins_w_metab, ]
-          metab_result<-metab_result[proteins_w_metab, ]
-          
-          #perform fisher method for joint p-values on all pathways
-          result = matrix(nrow=length(metab_result[,1]), ncol=11)
-          for(i in 1:length(metab_result[,1])){
-            result[i,1] = Fisher.test(p = c(protein_result[i,2], metab_result[i,2]))
-            result[i,2] = protein_result[i,2]
-            result[i,3] = protein_result[i,3]
-            result[i,4] = protein_result[i,4]
-            result[i,5] = protein_result[i,5]
-            result[i,6] = protein_result[i,6]
-            result[i,7] = metab_result[i,2]
-            result[i,8] = metab_result[i,3]
-            result[i,9] = metab_result[i,4]
-            result[i,10] = metab_result[i,5]
-            result[i,11] = metab_result[i,6]
-          }
-          
-          #Perform tail-based (BH) Fdr analysis
-          toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
-          FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
-          #Create final dataframe
-          finalResult = cbind(FDR, result)
-          
-          #label row and column names appropriately
-          row.names(finalResult)<-row.names(metab_result)
-          colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue",colnames(protein_result[-1]), colnames(metab_result[-1]))
-          
-          finalResult<-finalResult[order(finalResult[,2]),]
-          return(finalResult)
-          
-        }
-      }
-      else if(is.null(metab_result)){
-        if(calculateFoldChange == FALSE){  
-          proteins_w_genes = row.names(protein_result)[which(row.names(protein_result)%in%row.names(gene_result))]
-          protein_result<-protein_result[proteins_w_genes, ]
-          gene_result<-gene_result[proteins_w_genes, ]
-          #perform fisher method for joint p-values on all pathways
-          result = matrix(nrow=length(gene_result[,1]), ncol=9)
-          for(i in 1:length(gene_result[,1])){
-            result[i,1] = Fisher.test(p = c(gene_result[i,2], protein_result[i,2]))
-            result[i,2] = gene_result[i,2]
-            result[i,3] = gene_result[i,3]
-            result[i,4] = gene_result[i,4]
-            result[i,5] = gene_result[i,5]
-            result[i,6] = protein_result[i,2]
-            result[i,7] = protein_result[i,3]
-            result[i,8] = protein_result[i,4]
-            result[i,9] = protein_result[i,5]
-            
-          }
-          
-          #Perform tail-based (BH) Fdr analysis
-          toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
-          FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
-          #Create final dataframe
-          finalResult = cbind(FDR, result)
-          
-          #label row and column names appropriately
-          row.names(finalResult)<-row.names(metab_result)
-          colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue",colnames(gene_result[-1]), colnames(protein_result[-1]))
-          
-          finalResult<-finalResult[order(finalResult[,2]),]
-          return(finalResult)
-          
-        }
-        else{
-          proteins_w_genes = row.names(protein_result)[which(row.names(protein_result)%in%row.names(gene_result))]
-          protein_result<-protein_result[proteins_w_genes, ]
-          gene_result<-gene_result[proteins_w_genes, ]
-          #perform fisher method for joint p-values on all pathways
-          result = matrix(nrow=length(gene_result[,1]), ncol=9)
-          for(i in 1:length(gene_result[,1])){
-            result[i,1] = Fisher.test(p = c(gene_result[i,2], protein_result[i,2]))
-            result[i,2] = gene_result[i,2]
-            result[i,3] = gene_result[i,3]
-            result[i,4] = gene_result[i,4]
-            result[i,5] = gene_result[i,5]
-            result[i,6] = gene_result[i,6]
-            result[i,7] = protein_result[i,2]
-            result[i,8] = protein_result[i,3]
-            result[i,9] = protein_result[i,4]
-            result[i,10] = protein_result[i,5]
-            result[i,11] = protein_result[i,6]
-            
-          }
-          
-          #Perform tail-based (BH) Fdr analysis
-          toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
-          FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
-          #Create final dataframe
-          finalResult = cbind(FDR, result)
-          
-          #label row and column names appropriately
-          row.names(finalResult)<-row.names(metab_result)
-          colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue",colnames(gene_result[-1]), colnames(protein_result[-1]))
-          
-          finalResult<-finalResult[order(finalResult[,2]),]
-          return(finalResult)
-          
-        }
-      }
-      else if(!is.null(gene_result)&!is.null(protein_result)&!is.null(metab_result)){
-        if(calculateFoldChange == FALSE){  
-          #filter for common pathways
-          proteins_w_genes = row.names(protein_result)[which(row.names(protein_result)%in%row.names(gene_result))]
-          proteins_w_genes_metab = proteins_w_genes[which(proteins_w_genes%in%row.names(metab_result))]
-          protein_result<-protein_result[proteins_w_genes_metab, ]
-          gene_result<-gene_result[proteins_w_genes_metab, ]
-          metab_result<-metab_result[proteins_w_genes_metab, ]
-          
-          
-          #perform fisher method for joint p-values on all pathways
-          result = matrix(nrow=length(metab_result[,1]), ncol=13)
-          for(i in 1:length(metab_result[,1])){
-            result[i,1] = Fisher.test(p = c(gene_result[i,2], protein_result[i,2], metab_result[i,2]))
-            result[i,2] = gene_result[i,2]
-            result[i,3] = gene_result[i,3]
-            result[i,4] = gene_result[i,4]
-            result[i,5] = gene_result[i,5]
-            result[i,6] = protein_result[i,2]
-            result[i,7] = protein_result[i,3]
-            result[i,8] = protein_result[i,4]
-            result[i,9] = protein_result[i,5]
-            result[i,10] = metab_result[i,2]
-            result[i,11] = metab_result[i,3]
-            result[i,12] = metab_result[i,4]
-            result[i,13] = metab_result[i,5]
-            
-          }
-          
-          #Perform tail-based (BH) Fdr analysis
-          toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
-          FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
-          #Create final dataframe
-          finalResult = cbind(FDR, result)
-          
-          #label row and column names appropriately
-          row.names(finalResult)<-row.names(metab_result)
-          colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue", colnames(gene_result[-1]), colnames(protein_result[-1]), colnames(metab_result[-1]))
-          
-          finalResult<-finalResult[order(finalResult[,2]),]
-          return(finalResult)
-          
-        }
-        else{
-          #filter for common pathways
-          proteins_w_genes = row.names(protein_result)[which(row.names(protein_result)%in%row.names(gene_result))]
-          proteins_w_genes_metab = proteins_w_genes[which(proteins_w_genes%in%row.names(metab_result))]
-          protein_result<-protein_result[proteins_w_genes_metab, ]
-          gene_result<-gene_result[proteins_w_genes_metab, ]
-          metab_result<-metab_result[proteins_w_genes_metab, ]
-          
-          
-          #perform fisher method for joint p-values on all pathways
-          result = matrix(nrow=length(metab_result[,1]), ncol=16)
-          for(i in 1:length(metab_result[,1])){
-            result[i,1] = Fisher.test(p = c(gene_result[i,2], protein_result[i,2], metab_result[i,2]))
-            result[i,2] = gene_result[i,2]
-            result[i,3] = gene_result[i,3]
-            result[i,4] = gene_result[i,4]
-            result[i,5] = gene_result[i,5]
-            result[i,6] = gene_result[i,6]
-            result[i,7] = protein_result[i,2]
-            result[i,8] = protein_result[i,3]
-            result[i,9] = protein_result[i,4]
-            result[i,10] = protein_result[i,5]
-            result[i,11] = protein_result[i,6]
-            result[i,12] = metab_result[i,2]
-            result[i,13] = metab_result[i,3]
-            result[i,14] = metab_result[i,4]
-            result[i,15] = metab_result[i,5]
-            result[i,16] = metab_result[i,6]
-            
-          }
-          
-          #Perform tail-based (BH) Fdr analysis
-          toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
-          FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
-          #Create final dataframe
-          finalResult = cbind(FDR, result)
-          
-          #label row and column names appropriately
-          row.names(finalResult)<-row.names(metab_result)
-          colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue", colnames(gene_result[-1]), colnames(protein_result[-1]), colnames(metab_result[-1]))
-          
-          finalResult<-finalResult[order(finalResult[,2]),]
-          return(finalResult)
-          
-        }
+        
+        #Perform tail-based (BH) Fdr analysis
+        toFDR = data.frame(replace(result[,1], result[,1]>1 | result[,1]==0, 1))
+        FDR = data.frame(p.adjust(toFDR[,1], method=p.adjustMethod))
+        #Create final dataframe
+        finalResult = cbind(FDR, result)
+        
+        #label row and column names appropriately
+        row.names(finalResult)<-row.names(metab_result)
+        colnames(finalResult) <- c("Pathway_Combined_FDR","Pathway_Combined_pValue",colnames(gene_result[-1]), colnames(metab_result[-1]))
+        finalResult<-finalResult[order(finalResult[,2]),]
+        return(finalResult)
+        
       }
     }
   }
   
+  #Function for plotting analysis result
+  plotIPA = function(x, cutoff=10){
+    
+    toPlot <- x[order(x[,3]),][1:cutoff,]
+    Annotation = factor(row.names(toPlot), levels = unique(row.names(toPlot)))
+    if(length(grep("Fold_Change", colnames(toPlot)))>0){
+      mid=0
+      p1 = ggplot2::qplot(Annotation, -log(toPlot[,2], base=2), geom= "bar", stat="identity", binwidth= 0.00001, fill = toPlot[,grep("Fold_Change", colnames(toPlot))[1]])
+      p2 = p1 + ggplot2::scale_fill_gradient2(midpoint = mid, "Fold Change", limits = c(min(x[,grep("Fold_Change", colnames(toPlot))[1]]),max(x[,grep("Fold_Change", colnames(toPlot))[1]])), low = "blue",mid = "black", high = "red", space = "Lab" )
+      p3 = p2 + ggplot2::ylab("Negative Log FDR")+ggplot2::xlab("")+ggplot2::coord_flip() + ggplot2::theme( panel.background = ggplot2::element_blank(), panel.grid = ggplot2::element_blank(), axis.line = ggplot2::element_line(colour = "black", size = 1), axis.text = ggplot2::element_text(face = "bold", colour = "black"),  axis.ticks = ggplot2::element_line(colour = "black"), axis.title = ggplot2::element_text(face="bold", colour = "black"))
+      return(p3)
+    }
+    else{
+      p1 = ggplot2::qplot(Annotation, -log(toPlot[,2], base=2), geom= "bar", stat="identity", binwidth= 0.00001)
+      p2 = p1 + ggplot2::ylab("Negative Log FDR")+ggplot2::xlab("")+ggplot2::coord_flip() + ggplot2::theme( panel.background = ggplot2::element_blank(), panel.grid = ggplot2::element_blank(), axis.line = ggplot2::element_line(colour = "black", size = 1), axis.text = ggplot2::element_text(face = "bold", colour = "black"),  axis.ticks = ggplot2::element_line(colour = "black"), axis.title = ggplot2::element_text(face="bold", colour = "black"))
+      return(p2)
+    }
+  }
   
   if(!is.null(geneResult)){
     
@@ -1156,15 +661,6 @@ ipa<-function(geneResult=NULL, proteinResult=NULL, metaboliteResult=NULL, combin
     geneR<-merge(pathIndex, geneR, by.x="row.names", by.y="row.names")
     geneR<-data.frame(geneR[,-1], row.names=geneR[,1])
     geneR<-geneR[order(geneR[,3]),]
-  }
-  
-  if(!is.null(proteinResult)){
-    
-    protein<-protein.test(testResult=proteinResult, method=method, proteins=proteins, cutoff=proteinCutoff, calculateFoldChange=calculateFoldChange)
-    proteinR<-protein[which(protein[,"Sig_protein_Number"]>=countThreshold),]
-    proteinR<-merge(pathIndex, proteinR, by.x="row.names", by.y="row.names")
-    proteinR<-data.frame(proteinR[,-1], row.names=proteinR[,1])
-    proteinR<-proteinR[order(proteinR[,3]),]
   }
   
   if(!is.null(metaboliteResult)){
@@ -1176,18 +672,31 @@ ipa<-function(geneResult=NULL, proteinResult=NULL, metaboliteResult=NULL, combin
     metabR<-metabR[order(metabR[,3]),]
   }
   
-  result<-list(geneR, proteinR, metabR)
-  names(result)<-c("Gene_Analysis", "Protein_Analysis", "Metabolite_Analysis")
+  result<-list(geneR, metabR)
+  names(result)<-c("Gene_Analysis", "Metabolite_Analysis")
   
   if(combine==TRUE){
-    combineR<-combined.test(gene_result=geneR[,-1], protein_result=proteinR[,-1], metab_result=metabR[,-1], calculateFoldChange=calculateFoldChange, method=method)
+    combineR<-combined.test(gene_result=geneR[,-1], metab_result=metabR[,-1], calculateFoldChange=calculateFoldChange, method=method)
     combineR<-merge(pathIndex, combineR, by.x="row.names", by.y="row.names")
     combineR<-data.frame(combineR[,-1], row.names=combineR[,1])
     combineR<-combineR[order(combineR[,3]),]
+    if(plotResult==TRUE){
+      PathPlot<-plotIPA(combineR, cutoff=plotNumber)
+      print(PathPlot)
+    }
     return(combineR)
   }
   else if(combine==FALSE){
-    
+    if (plotResult==TRUE){
+      if(!is.null(result[[1]])){
+        PathPlot<-plotIPA(result[[1]], cutoff=plotNumber)
+        print(PathPlot)
+      }
+      if(!is.null(result[[2]])){
+        PathPlot<-plotIPA(result[[2]], cutoff=plotNumber)
+        print(PathPlot)
+      }
+    }
     return(result)
   }
 }
